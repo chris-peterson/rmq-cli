@@ -1,11 +1,10 @@
-FROM rabbitmq:3.11.2-management
+FROM rabbitmq:3.11.20-management
 
 LABEL maintainer="chrispeterson@fastmail.com"
 
 ADD bin/* /usr/bin/
 
-RUN apt-get update; \
-  apt-get install -y curl jq
+RUN apt-get update && apt-get install -y curl jq
 
 RUN chmod +x /usr/bin/rmq*
 

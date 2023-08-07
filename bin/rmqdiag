@@ -1,0 +1,7 @@
+
+#!/usr/bin/env sh
+if [ -n "${RABBIT_ERLANG_COOKIE+1}" ]; then
+  echo $RABBIT_ERLANG_COOKIE > $HOME/.erlang.cookie
+fi
+
+rabbitmq-diagnostics --node "rabbit@$RABBIT_HOST" --longnames $@

@@ -31,7 +31,7 @@ The following are some common examples for how you might use the container.
 ```sh
 docker run -e RABBIT_HOST=rabbitmqserver \
    -e RABBIT_USER=admin -e RABBIT_PASSWORD=p@ssw0rd \
-   ghcr.io/chris-peterson/rmq-cli/rmq-cli rmqa list queues
+   ghcr.io/chris-peterson/rmq-cli:main rmqa list queues
 ```
 
 #### Example: Export Configuration
@@ -39,7 +39,7 @@ docker run -e RABBIT_HOST=rabbitmqserver \
 ```sh
 docker run -e RABBIT_HOST=rabbitmqserver \
    -e RABBIT_USER=admin -e RABBIT_PASSWORD=p@ssw0rd \
-   ghcr.io/chris-peterson/rmq-cli/rmq-cli rmqa export config.json
+   ghcr.io/chris-peterson/rmq-cli:main rmqa export config.json
 ```
 
 #### Example: Show Overview
@@ -47,7 +47,7 @@ docker run -e RABBIT_HOST=rabbitmqserver \
 ```sh
 docker run -e RABBIT_HOST=rabbitmqserver \
    -e RABBIT_USER=admin -e RABBIT_PASSWORD=p@ssw0rd \
-   ghcr.io/chris-peterson/rmq-cli/rmq-cli rmqa show overview --format=pretty_json
+   ghcr.io/chris-peterson/rmq-cli:main rmqa show overview --format=pretty_json
 ```
 
 #### Example: GitLab CI
@@ -58,7 +58,7 @@ stages:
 - deploy
 - rollback
 
-image: ghcr.io/chris-peterson/rmq-cli/rmq-cli
+image: ghcr.io/chris-peterson/rmq-cli:main
 
 variables:
   RABBIT_USER: admin

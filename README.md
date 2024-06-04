@@ -9,7 +9,7 @@ The container contains the following:
 * [jq](https://stedolan.github.io/jq/) - command line JSON processor
 * [python](https://www.python.org/) - needed to support `rabbitmqadmin`
 
-The default `CMD` is `rmq` which invokes `rabbitmqctl` honoring [environment varibles](#environment-variables).
+The default `CMD` is `rmq` which invokes `rabbitmqctl` honoring [environment variables](#environment-variables).
 
 ### Environment Variables
 

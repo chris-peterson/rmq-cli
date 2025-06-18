@@ -1,4 +1,4 @@
-FROM rabbitmq:3.13.3-management
+FROM rabbitmq:4.1.1-management
 
 LABEL maintainer="chrispeterson@fastmail.com"
 

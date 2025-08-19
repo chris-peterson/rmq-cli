@@ -118,3 +118,7 @@ rollback:production:
   variables:
     RABBIT_HOST: production-rabbitmqserver
 ```
+
+## Acknowledgements
+
+* https://github.com/activatedgeek/docker-rabbitmqadmin

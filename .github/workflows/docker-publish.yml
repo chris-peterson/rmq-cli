@@ -1,7 +1,10 @@
 name: Docker
 
 on:
-  push
+  push:
+    paths-ignore:
+      - 'docs/**'
+      - '.github/workflows/docs.yml'
 
 env:
   IMAGE_NAME: rmq-cli

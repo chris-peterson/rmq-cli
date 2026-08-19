@@ -31,7 +31,7 @@ and JSON/CSV output for most commands are gone. See the
 ```bash
 docker run -e RABBIT_HOST=rabbitmqserver \
    -e RABBIT_USER=admin -e RABBIT_PASSWORD=p@ssw0rd \
-   ghcr.io/chris-peterson/rmq-cli:main rmqa list queues
+   ghcr.io/chris-peterson/rmq-cli:4.3 rmqa list queues
 ```
 
 ### Export Configuration
@@ -39,7 +39,7 @@ docker run -e RABBIT_HOST=rabbitmqserver \
 ```bash
 docker run -e RABBIT_HOST=rabbitmqserver \
    -e RABBIT_USER=admin -e RABBIT_PASSWORD=p@ssw0rd \
-   ghcr.io/chris-peterson/rmq-cli:main rmqa definitions export --file config.json
+   ghcr.io/chris-peterson/rmq-cli:4.3 rmqa definitions export --file config.json
 ```
 
 ### Show Overview
@@ -47,7 +47,7 @@ docker run -e RABBIT_HOST=rabbitmqserver \
 ```bash
 docker run -e RABBIT_HOST=rabbitmqserver \
    -e RABBIT_USER=admin -e RABBIT_PASSWORD=p@ssw0rd \
-   ghcr.io/chris-peterson/rmq-cli:main rmqa show overview
+   ghcr.io/chris-peterson/rmq-cli:4.3 rmqa show overview
 ```
 
 ### GitLab CI
@@ -58,7 +58,7 @@ stages:
 - deploy
 - rollback
 
-image: ghcr.io/chris-peterson/rmq-cli:main
+image: ghcr.io/chris-peterson/rmq-cli:4.3
 
 variables:
   RABBIT_USER: admin
@@ -101,6 +101,28 @@ rollback:test:
     RABBIT_HOST: test-rabbitmqserver
 ```
 
+## Image tags
+
+Tags follow the RabbitMQ base image version, in two forms:
+
+| Tag | Moves? | Use it when |
+| --- | --- | --- |
+| `4.3` | to the newest `4.3.x` | **recommended** — patch updates within a minor line, so the `rabbitmqadmin` CLI grammar stays put |
+| `4.3.5` | never | you need a byte-identical image on every pull |
+
+### Older versions
+
+Still resolvable, no longer built:
+
+| Tag | RabbitMQ | Notes |
+| --- | --- | --- |
+| `4.1.1` | 4.1.1 | last release before the base image switched to `rabbitmqadmin` v2 |
+| `4.x` | 4.1.1 | no longer produced, in favor of the `X.Y` and `X.Y.Z` forms [above](#image-tags) |
+| `3.13` | 3.13.3 | RabbitMQ 3.x, `rabbitmqadmin` v1 grammar |
+
+`4.1.1` and earlier ship the Python `rabbitmqadmin` v1, where definitions export is
+`export <file>` rather than `definitions export --file <file>`.
+
 ## Verifying the image
 
 Published images carry a [SLSA build provenance](https://slsa.dev/spec/v1.0/provenance)
@@ -114,9 +136,63 @@ gh attestation verify oci://ghcr.io/chris-peterson/rmq-cli:4.3.5 \
    --repo chris-peterson/rmq-cli
 ```
 
-To read the SBOM instead of verifying the signature:
+```text
+Loaded digest sha256:a0fb14f79d4bfc9b78c36c8eb0f2a5d81c37317e128be8768bf7ccaa696beb93 for oci://ghcr.io/chris-peterson/rmq-cli:4.3.5
+Loaded 1 attestation from GitHub API
+
+The following policy criteria will be enforced:
+- Predicate type must match:................ https://slsa.dev/provenance/v1
+- Source Repository Owner URI must match:... https://github.com/chris-peterson
+- Source Repository URI must match:......... https://github.com/chris-peterson/rmq-cli
+- Subject Alternative Name must match regex: (?i)^https://github\.com/chris-peterson/rmq-cli/
+- OIDC Issuer must match:................... https://token.actions.githubusercontent.com
+
+✓ Verification succeeded!
+
+The following 1 attestation matched the policy criteria
+
+- Attestation #1
+  - Build repo:..... chris-peterson/rmq-cli
+  - Build workflow:. .github/workflows/docker-publish.yml@refs/tags/4.3.5
+  - Signer repo:.... chris-peterson/rmq-cli
+  - Signer workflow: .github/workflows/docker-publish.yml@refs/tags/4.3.5
+```
+
+**In a pipeline, gate on the exit code, not the output.** That report is only
+printed to a terminal; with stdout redirected or piped, `gh attestation verify`
+prints nothing at all and signals solely through its exit status. A silent success
+is easily misread as a failed command:
+
+```bash
+if gh attestation verify oci://ghcr.io/chris-peterson/rmq-cli:4.3 \
+     --repo chris-peterson/rmq-cli >/dev/null 2>&1; then
+   echo "provenance ok"
+fi
+```
+
+## Reading the SBOM
+
+Each image carries an SPDX SBOM per platform, so you can answer "does this
+CVE affect me" without pulling and scanning the image yourself:
 
 ```bash
 docker buildx imagetools inspect ghcr.io/chris-peterson/rmq-cli:4.3.5 \
-   --format '{{ json .SBOM }}'
+   --format '{{ json .SBOM }}' \
+   | jq -r '."linux/amd64".SPDX.packages[] | "\(.name) \(.versionInfo)"' | sort
 ```
+
+```text
+adduser 3.137ubuntu1
+apt 2.8.3
+base-files 13ubuntu10.4
+base-passwd 3.6.3build1
+bash 5.2.21-2ubuntu4
+bsdutils 1:2.39.3-9ubuntu6.5
+ca-certificates 20260601~24.04.1
+coreutils 9.4-3ubuntu6.2
+...
+```
+
+Swap `linux/amd64` for `linux/arm64` to read the other platform; both carry 124
+packages for 4.3.5. The signed SBOM attestations are separate from these, one per
+platform, and are what `gh attestation verify` checks.

@@ -1,0 +1,17 @@
+version: 2
+
+updates:
+  # tracks the rabbitmq:*-management base image, which is what the git tag mirrors
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      # one PR per sweep rather than seven; these move together in practice
+      actions:
+        patterns: ['*']

@@ -10,6 +10,11 @@ The container contains the following:
 
 The default `CMD` is `rmq` which invokes `rabbitmqctl` honoring [environment variables](#environment-variables).
 
+Images are tagged `X.Y.Z` and `X.Y`, tracking the RabbitMQ base image version. Pin
+`X.Y` for patch updates within a minor line. Every image is signed with SLSA
+provenance and ships an SBOM per platform — see
+[tags and verification](https://chris-peterson.github.io/rmq-cli/#/?id=image-tags).
+
 ### Environment Variables
 
 A few environment variables can be provided:
@@ -30,7 +35,7 @@ The following are some common examples for how you might use the container.
 ```sh
 docker run -e RABBIT_HOST=rabbitmqserver \
    -e RABBIT_USER=admin -e RABBIT_PASSWORD=p@ssw0rd \
-   ghcr.io/chris-peterson/rmq-cli:main rmqa list queues
+   ghcr.io/chris-peterson/rmq-cli:4.3 rmqa list queues
 ```
 
 #### Example: Export Configuration
@@ -38,7 +43,7 @@ docker run -e RABBIT_HOST=rabbitmqserver \
 ```sh
 docker run -e RABBIT_HOST=rabbitmqserver \
    -e RABBIT_USER=admin -e RABBIT_PASSWORD=p@ssw0rd \
-   ghcr.io/chris-peterson/rmq-cli:main rmqa definitions export --file config.json
+   ghcr.io/chris-peterson/rmq-cli:4.3 rmqa definitions export --file config.json
 ```
 
 #### Example: Show Overview
@@ -46,7 +51,7 @@ docker run -e RABBIT_HOST=rabbitmqserver \
 ```sh
 docker run -e RABBIT_HOST=rabbitmqserver \
    -e RABBIT_USER=admin -e RABBIT_PASSWORD=p@ssw0rd \
-   ghcr.io/chris-peterson/rmq-cli:main rmqa show overview
+   ghcr.io/chris-peterson/rmq-cli:4.3 rmqa show overview
 ```
 
 #### Example: GitLab CI
@@ -57,7 +62,7 @@ stages:
 - deploy
 - rollback
 
-image: ghcr.io/chris-peterson/rmq-cli:main
+image: ghcr.io/chris-peterson/rmq-cli:4.3
 
 variables:
   RABBIT_USER: admin

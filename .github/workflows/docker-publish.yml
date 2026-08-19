@@ -2,12 +2,7 @@ name: Docker
 
 on:
   push:
-    branches: [main]
     tags: ['[0-9]+.[0-9]+.[0-9]+*']
-    paths-ignore:
-      - 'docs/**'
-      - '.github/workflows/docs.yml'
-  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -16,14 +11,24 @@ permissions:
   id-token: write
   attestations: write
 
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
 jobs:
-  docker:
+  build:
 
-    runs-on: ubuntu-latest
+    if: github.ref_type == 'tag'
 
-    outputs:
-      base: ${{ steps.base.outputs.image }}
-      tags: ${{ steps.meta.outputs.tags }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+
+    runs-on: ${{ matrix.runner }}
 
     steps:
       -
@@ -31,12 +36,70 @@ jobs:
         uses: actions/checkout@v7
 
       -
-        name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+        name: Read base image from Dockerfile
+        id: base
+        run: echo "image=$(sed -n '1s/^FROM //p' Dockerfile)" >> "$GITHUB_OUTPUT"
 
       -
         name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
+
+      -
+        name: Login to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      -
+        name: Build and push by digest
+        id: push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          sbom: true
+          labels: org.opencontainers.image.base.name=${{ steps.base.outputs.image }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+
+      -
+        name: Install syft
+        uses: anchore/sbom-action/download-syft@v0.24.0
+
+      -
+        name: Generate the SBOM
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          mkdir -p /tmp/out
+          syft "${IMAGE}@${DIGEST}" -o spdx-json=/tmp/out/sbom-${{ matrix.arch }}.spdx.json
+          echo "${DIGEST#sha256:}" > /tmp/out/digest-${{ matrix.arch }}
+
+      -
+        name: Upload the digest and SBOM
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-${{ matrix.arch }}
+          path: /tmp/out/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+
+    needs: build
+
+    runs-on: ubuntu-latest
+
+    outputs:
+      digest: ${{ steps.index.outputs.digest }}
+      tags: ${{ steps.meta.outputs.tags }}
+      base: ${{ steps.base.outputs.image }}
+
+    steps:
+      -
+        name: Checkout
+        uses: actions/checkout@v7
 
       -
         name: Read base image from Dockerfile
@@ -44,8 +107,19 @@ jobs:
         run: echo "image=$(sed -n '1s/^FROM //p' Dockerfile)" >> "$GITHUB_OUTPUT"
 
       -
+        name: Download the per-architecture builds
+        uses: actions/download-artifact@v8
+        with:
+          pattern: build-*
+          merge-multiple: true
+          path: /tmp/out
+
+      -
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      -
         name: Login to GitHub Container Registry
-        if: github.event_name != 'pull_request'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -57,78 +131,83 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ${{ env.IMAGE }}
+          flavor: latest=false
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=${{ github.ref_name }},enable=${{ startsWith(github.ref, 'refs/tags/') }}
-            type=raw,value=main,enable={{is_default_branch}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
-          labels: |
-            org.opencontainers.image.base.name=${{ steps.base.outputs.image }}
+            type=raw,value=${{ github.ref_name }}
 
       -
-        name: Build and push
-        id: push
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          sbom: ${{ github.event_name != 'pull_request' }}
-
-      -
-        name: Install syft
-        if: github.event_name != 'pull_request'
-        uses: anchore/sbom-action/download-syft@v0.24.0
-
-      -
-        name: Generate per-platform SBOMs
-        if: github.event_name != 'pull_request'
-        env:
-          IMAGE: ghcr.io/${{ github.repository }}@${{ steps.push.outputs.digest }}
+        name: Assemble the manifest list
         run: |
-          syft "$IMAGE" --platform linux/amd64 -o spdx-json=sbom-amd64.spdx.json
-          syft "$IMAGE" --platform linux/arm64 -o spdx-json=sbom-arm64.spdx.json
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(for f in /tmp/out/digest-*; do printf '%s@sha256:%s ' "$IMAGE" "$(cat "$f")"; done)
+
+      -
+        name: Read the index digest
+        id: index
+        run: |
+          digest=$(docker buildx imagetools inspect "${IMAGE}:${{ steps.meta.outputs.version }}" \
+            --format '{{ json .Manifest }}' | jq -r .digest)
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+  attest:
+
+    needs: merge
+
+    runs-on: ubuntu-latest
+
+    steps:
+      -
+        name: Download the SBOMs
+        uses: actions/download-artifact@v8
+        with:
+          pattern: build-*
+          merge-multiple: true
+          path: /tmp/out
+
+      -
+        name: Login to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       -
         name: Attest build provenance
-        if: github.event_name != 'pull_request'
         uses: actions/attest@v4
         with:
-          subject-name: ghcr.io/${{ github.repository }}
-          subject-digest: ${{ steps.push.outputs.digest }}
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ needs.merge.outputs.digest }}
           push-to-registry: true
           create-storage-record: false
 
       -
         name: Attest the amd64 SBOM
-        if: github.event_name != 'pull_request'
         uses: actions/attest@v4
         with:
-          subject-name: ghcr.io/${{ github.repository }}
-          subject-digest: ${{ steps.push.outputs.digest }}
-          sbom-path: sbom-amd64.spdx.json
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ needs.merge.outputs.digest }}
+          sbom-path: /tmp/out/sbom-amd64.spdx.json
           push-to-registry: true
           create-storage-record: false
 
       -
         name: Attest the arm64 SBOM
-        if: github.event_name != 'pull_request'
         uses: actions/attest@v4
         with:
-          subject-name: ghcr.io/${{ github.repository }}
-          subject-digest: ${{ steps.push.outputs.digest }}
-          sbom-path: sbom-arm64.spdx.json
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ needs.merge.outputs.digest }}
+          sbom-path: /tmp/out/sbom-arm64.spdx.json
           push-to-registry: true
           create-storage-record: false
 
   release:
 
-    needs: docker
-    if: startsWith(github.ref, 'refs/tags/')
+    needs: [merge, attest]
 
     runs-on: ubuntu-latest
 
@@ -142,10 +221,13 @@ jobs:
       -
         name: Assemble release notes
         env:
-          BASE: ${{ needs.docker.outputs.base }}
-          TAGS: ${{ needs.docker.outputs.tags }}
+          BASE: ${{ needs.merge.outputs.base }}
+          TAGS: ${{ needs.merge.outputs.tags }}
         run: |
-          git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > notes.md
+          : > notes.md
+          if [ "$(git cat-file -t "$GITHUB_REF_NAME")" = tag ]; then
+            git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > notes.md
+          fi
           printf '\n---\n\nBuilt from `%s`.\n\nPublished tags:\n\n```\n%s\n```\n' \
             "$BASE" "$TAGS" >> notes.md
 

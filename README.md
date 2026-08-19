@@ -4,10 +4,9 @@ A docker image for administration of `RabbitMQ` (using `rabbitmqadmin` and/or `r
 
 The container contains the following:
 
-* [rabbitmqadmin](https://www.rabbitmq.com/management-cli.html)
+* [rabbitmqadmin](https://www.rabbitmq.com/docs/management-cli)
 * [rabbitmqctl](https://www.rabbitmq.com/rabbitmqctl.8.html)
 * [jq](https://stedolan.github.io/jq/) - command line JSON processor
-* [python](https://www.python.org/) - needed to support `rabbitmqadmin`
 
 The default `CMD` is `rmq` which invokes `rabbitmqctl` honoring [environment variables](#environment-variables).
 
@@ -39,7 +38,7 @@ docker run -e RABBIT_HOST=rabbitmqserver \
 ```sh
 docker run -e RABBIT_HOST=rabbitmqserver \
    -e RABBIT_USER=admin -e RABBIT_PASSWORD=p@ssw0rd \
-   ghcr.io/chris-peterson/rmq-cli:main rmqa export config.json
+   ghcr.io/chris-peterson/rmq-cli:main rmqa definitions export --file config.json
 ```
 
 #### Example: Show Overview
@@ -47,7 +46,7 @@ docker run -e RABBIT_HOST=rabbitmqserver \
 ```sh
 docker run -e RABBIT_HOST=rabbitmqserver \
    -e RABBIT_USER=admin -e RABBIT_PASSWORD=p@ssw0rd \
-   ghcr.io/chris-peterson/rmq-cli:main rmqa show overview --format=pretty_json
+   ghcr.io/chris-peterson/rmq-cli:main rmqa show overview
 ```
 
 #### Example: GitLab CI
@@ -66,7 +65,7 @@ variables:
 
 .snapshot:
   stage: snapshot
-  script: rmqa export $RABBIT_HOST.config
+  script: rmqa definitions export --file $RABBIT_HOST.config
   artifacts:
     paths:
     - $RABBIT_HOST.config
@@ -79,7 +78,7 @@ variables:
 
 .rollback:
   stage: rollback
-  script: rmqa import $RABBIT_HOST.config
+  script: rmqa definitions import --file $RABBIT_HOST.config
   when: manual
 
 snapshot:test:

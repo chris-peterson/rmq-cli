@@ -2,18 +2,28 @@ name: Docker
 
 on:
   push:
+    branches: [main]
+    tags: ['[0-9]+.[0-9]+.[0-9]+*']
     paths-ignore:
       - 'docs/**'
       - '.github/workflows/docs.yml'
+  pull_request:
+  workflow_dispatch:
 
-env:
-  IMAGE_NAME: rmq-cli
-  VERSION: ${{ github.ref_name }}
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+  attestations: write
 
 jobs:
   docker:
 
     runs-on: ubuntu-latest
+
+    outputs:
+      base: ${{ steps.base.outputs.image }}
+      tags: ${{ steps.meta.outputs.tags }}
 
     steps:
       -
@@ -29,7 +39,13 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       -
+        name: Read base image from Dockerfile
+        id: base
+        run: echo "image=$(sed -n '1s/^FROM //p' Dockerfile)" >> "$GITHUB_OUTPUT"
+
+      -
         name: Login to GitHub Container Registry
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -37,11 +53,105 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       -
+        name: Compute image tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=${{ github.ref_name }},enable=${{ startsWith(github.ref, 'refs/tags/') }}
+            type=raw,value=main,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
+          labels: |
+            org.opencontainers.image.base.name=${{ steps.base.outputs.image }}
+
+      -
         name: Build and push
+        id: push
         uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ghcr.io/${{github.actor}}/${{env.IMAGE_NAME}}:${{env.VERSION}}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          sbom: ${{ github.event_name != 'pull_request' }}
+
+      -
+        name: Install syft
+        if: github.event_name != 'pull_request'
+        uses: anchore/sbom-action/download-syft@v0.24.0
+
+      -
+        name: Generate per-platform SBOMs
+        if: github.event_name != 'pull_request'
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}@${{ steps.push.outputs.digest }}
+        run: |
+          syft "$IMAGE" --platform linux/amd64 -o spdx-json=sbom-amd64.spdx.json
+          syft "$IMAGE" --platform linux/arm64 -o spdx-json=sbom-arm64.spdx.json
+
+      -
+        name: Attest build provenance
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@v4
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+      -
+        name: Attest the amd64 SBOM
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@v4
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          sbom-path: sbom-amd64.spdx.json
+          push-to-registry: true
+          create-storage-record: false
+
+      -
+        name: Attest the arm64 SBOM
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@v4
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          sbom-path: sbom-arm64.spdx.json
+          push-to-registry: true
+          create-storage-record: false
+
+  release:
+
+    needs: docker
+    if: startsWith(github.ref, 'refs/tags/')
+
+    runs-on: ubuntu-latest
+
+    steps:
+      -
+        name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      -
+        name: Assemble release notes
+        env:
+          BASE: ${{ needs.docker.outputs.base }}
+          TAGS: ${{ needs.docker.outputs.tags }}
+        run: |
+          git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > notes.md
+          printf '\n---\n\nBuilt from `%s`.\n\nPublished tags:\n\n```\n%s\n```\n' \
+            "$BASE" "$TAGS" >> notes.md
+
+      -
+        name: Publish the release
+        uses: softprops/action-gh-release@v3
+        with:
+          generate_release_notes: false
+          body_path: notes.md

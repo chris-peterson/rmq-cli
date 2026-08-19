@@ -100,3 +100,23 @@ rollback:test:
   variables:
     RABBIT_HOST: test-rabbitmqserver
 ```
+
+## Verifying the image
+
+Published images carry a [SLSA build provenance](https://slsa.dev/spec/v1.0/provenance)
+attestation and per-platform SBOMs, signed by Sigstore during the build. The
+provenance binds the image digest to the workflow run that produced it, so you can
+confirm an image came from this repository rather than from someone who pushed a
+similarly-named tag.
+
+```bash
+gh attestation verify oci://ghcr.io/chris-peterson/rmq-cli:4.3.5 \
+   --repo chris-peterson/rmq-cli
+```
+
+To read the SBOM instead of verifying the signature:
+
+```bash
+docker buildx imagetools inspect ghcr.io/chris-peterson/rmq-cli:4.3.5 \
+   --format '{{ json .SBOM }}'
+```
